@@ -1,0 +1,18 @@
+# Flutter / Dart
+app/.dart_tool/
+app/build/
+app/.flutter-plugins*
+app/.packages
+app/coverage/
+app/pubspec.lock.bak
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Local runtime artifacts
+*.log

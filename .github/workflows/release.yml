@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    # Skip release for docs/CI-only changes and for the bump commit itself
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute next version (patch bump from latest tag)
+        id: bump
+        run: |
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          latest=${latest:-v0.0.0}
+          IFS=. read -r maj min pat <<<"${latest#v}"
+          version="$maj.$min.$((pat+1))"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+  build-linux:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install linux desktop deps
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev
+      - name: Stamp version
+        run: |
+          cd app
+          sed -i "s/^version: .*/version: ${{ needs.version.outputs.version }}+${{ github.run_number }}/" pubspec.yaml
+      - run: cd app && flutter pub get && flutter build linux --release
+      - name: Package
+        run: |
+          cd app/build/linux/x64/release/bundle
+          tar czf "$GITHUB_WORKSPACE/read-aloud-ui-${{ needs.version.outputs.version }}-linux-x64.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: read-aloud-ui-*-linux-x64.tar.gz
+
+  build-macos:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Stamp version
+        run: |
+          cd app
+          sed -i '' "s/^version: .*/version: ${{ needs.version.outputs.version }}+${{ github.run_number }}/" pubspec.yaml
+      - run: cd app && flutter pub get && flutter build macos --release
+      - name: Package (unsigned .app)
+        run: |
+          cd app/build/macos/Build/Products/Release
+          ditto -c -k --keepParent read_aloud_ui.app "$GITHUB_WORKSPACE/read-aloud-ui-${{ needs.version.outputs.version }}-macos.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: read-aloud-ui-*-macos.zip
+
+  release:
+    needs: [version, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Commit version bump back to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          sed -i "s/^version: .*/version: ${{ needs.version.outputs.version }}+${{ github.run_number }}/" app/pubspec.yaml
+          git add app/pubspec.yaml
+          git commit -m "chore(release): ${{ needs.version.outputs.tag }}"
+          git tag ${{ needs.version.outputs.tag }}
+          git push origin main --tags
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ${{ needs.version.outputs.tag }} \
+            --title "read-aloud-ui ${{ needs.version.outputs.tag }}" \
+            --generate-notes \
+            read-aloud-ui-*-linux-x64.tar.gz read-aloud-ui-*-macos.zip
