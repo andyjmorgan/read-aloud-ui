@@ -44,8 +44,9 @@ Future<void> main(List<String> args) async {
   }
 
   if (!mcpMode && await SingletonIpc.isInstanceRunning(socketPath)) {
-    stderr.writeln('read-aloud is already running (socket: $socketPath).');
-    exit(1);
+    // surface the running instance's window instead of erroring
+    await SingletonIpc.request(socketPath, {'cmd': 'show'});
+    exit(0);
   }
 
   // Primary instance: full app (GUI + IPC + worker), optionally MCP on stdio.
@@ -90,6 +91,7 @@ Future<void> main(List<String> args) async {
     title: 'Read Aloud',
   );
   unawaited(windowManager.waitUntilReadyToShow(options, () async {
+    await windowManager.setPreventClose(true); // close button hides to tray
     await windowManager.show();
     await windowManager.focus();
   }));

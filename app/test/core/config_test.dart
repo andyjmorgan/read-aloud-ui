@@ -21,6 +21,7 @@ void main() {
   test('load returns defaults when file missing', () async {
     final config = await store().load();
     expect(config.isConfigured, isFalse);
+    expect(config.serverBaseUrl, kDefaultServerBaseUrl);
     expect(config.voice, 'af_heart');
     expect(config.speed, 1.0);
     expect(config.autoPlay, isTrue);
@@ -70,6 +71,15 @@ void main() {
     expect(config.serverBaseUrl, 'http://s');
     expect(config.apiKey, '');
     expect(config.speed, 1.0);
+  });
+
+  test('missing serverBaseUrl falls back to the built-in default', () async {
+    final s = store();
+    await File(s.configPath).create(recursive: true);
+    await File(s.configPath).writeAsString(jsonEncode({'apiKey': 'k'}));
+    final config = await s.load();
+    expect(config.serverBaseUrl, kDefaultServerBaseUrl);
+    expect(config.isConfigured, isTrue);
   });
 
   test('dbPath lives under dataDir', () {

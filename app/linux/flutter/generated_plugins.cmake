@@ -6,7 +6,6 @@ list(APPEND FLUTTER_PLUGIN_LIST
   local_notifier
   media_kit_libs_linux
   screen_retriever_linux
-  tray_manager
   window_manager
 )
 

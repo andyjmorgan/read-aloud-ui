@@ -227,14 +227,13 @@ void main() {
       )));
       await _waitFor(tester, find.text('Save settings'));
 
-      // invalid: empty URL blocks save
+      // invalid: empty API key blocks save
       await tester.tap(find.text('Save settings'));
       await tester.pump();
-      expect(find.text('Enter a valid absolute URL'), findsOneWidget);
+      expect(find.text('API key is required'), findsOneWidget);
       expect(store.saved, isNull);
+      expect(find.textContaining('server URL'), findsNothing, reason: 'server URL is not user-configurable');
 
-      await tester.enterText(
-          find.widgetWithText(TextFormField, 'Recordings server URL'), 'http://server:5000');
       await tester.enterText(find.widgetWithText(TextFormField, 'API key'), 'secret');
 
       // pick the HDMI device from the fake sink's list
@@ -248,7 +247,7 @@ void main() {
 
       expect(savedCallback, isTrue);
       final saved = store.saved!;
-      expect(saved.serverBaseUrl, 'http://server:5000');
+      expect(saved.serverBaseUrl, kDefaultServerBaseUrl, reason: 'URL stays at built-in default');
       expect(saved.apiKey, 'secret');
       expect(saved.audioDevice, 'pulse/hdmi');
       expect(sink.device, 'pulse/hdmi');
@@ -257,7 +256,7 @@ void main() {
 
     testWidgets('api key is obscured with toggle', (tester) async {
       _tallViewport(tester);
-      store.seed = AppConfig(serverBaseUrl: 'http://s', apiKey: 'k', libraryDir: '/lib');
+      store.seed = AppConfig(apiKey: 'k', libraryDir: '/lib');
       await tester.pumpWidget(_wrap(ConfigScreen(engine: engine, configStore: store, onSaved: () async {})));
       await _waitFor(tester, find.byIcon(Icons.visibility_outlined));
       await tester.tap(find.byIcon(Icons.visibility_outlined));
@@ -278,7 +277,7 @@ class _MemConfigStore extends ConfigStore {
 
   @override
   Future<AppConfig> load() async =>
-      seed ?? AppConfig(serverBaseUrl: '', apiKey: '', libraryDir: defaultLibraryDir);
+      seed ?? AppConfig(apiKey: '', libraryDir: defaultLibraryDir);
 
   @override
   Future<void> save(AppConfig config) async => saved = config;

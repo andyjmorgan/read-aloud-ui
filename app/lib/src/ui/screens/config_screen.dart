@@ -20,7 +20,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
   late final ConfigStore _store = widget.configStore ?? ConfigStore();
   final _formKey = GlobalKey<FormState>();
 
-  final _serverUrl = TextEditingController();
   final _apiKey = TextEditingController();
   final _voice = TextEditingController();
   final _libraryDir = TextEditingController();
@@ -44,7 +43,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
     if (!mounted) return;
     setState(() {
       _config = config;
-      _serverUrl.text = config.serverBaseUrl;
       _apiKey.text = config.apiKey;
       _voice.text = config.voice;
       _libraryDir.text = config.libraryDir;
@@ -60,7 +58,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final config = _config!;
     config
-      ..serverBaseUrl = _serverUrl.text.trim().replaceAll(RegExp(r'/+$'), '')
       ..apiKey = _apiKey.text.trim()
       ..voice = _voice.text.trim().isEmpty ? 'af_heart' : _voice.text.trim()
       ..libraryDir = _libraryDir.text.trim()
@@ -90,12 +87,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
                 padding: const EdgeInsets.all(24),
                 children: [
                   _section(context, 'Server'),
-                  TextFormField(
-                    controller: _serverUrl,
-                    decoration: const InputDecoration(labelText: 'Recordings server URL', hintText: 'https://recordings.example.dev'),
-                    validator: (v) => (v == null || v.trim().isEmpty || !Uri.parse(v.trim()).isAbsolute) ? 'Enter a valid absolute URL' : null,
-                  ),
-                  const SizedBox(height: 16),
                   TextFormField(
                     controller: _apiKey,
                     obscureText: _obscureKey,
@@ -189,7 +180,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   @override
   void dispose() {
-    _serverUrl.dispose();
     _apiKey.dispose();
     _voice.dispose();
     _libraryDir.dispose();

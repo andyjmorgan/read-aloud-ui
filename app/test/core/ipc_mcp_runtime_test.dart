@@ -177,6 +177,13 @@ void main() {
       final unknown = await SingletonIpc.request(sock('rt'), {'cmd': 'wat'});
       expect(unknown?['ok'], isFalse);
 
+      // 'show' invokes the UI hook when registered, succeeds regardless
+      var shown = 0;
+      runtime.onShowRequested = () async => shown++;
+      final show = await SingletonIpc.request(sock('rt'), {'cmd': 'show'});
+      expect(show?['ok'], isTrue);
+      expect(shown, 1);
+
       // forwarding MCP server (bridge mode) drives the same socket
       final stdin = StreamController<List<int>>();
       final replies = <Map<String, Object?>>[];

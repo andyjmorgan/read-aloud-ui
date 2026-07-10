@@ -1,10 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
 
+/// The Recordings backend this client is built for. Overridable in the config
+/// file for dev/testing, but not exposed in the UI.
+const kDefaultServerBaseUrl = 'https://recordings.donkeywork.dev';
+
 /// Application configuration, persisted as JSON (0600) in the XDG config dir.
 class AppConfig {
   AppConfig({
-    required this.serverBaseUrl,
+    this.serverBaseUrl = kDefaultServerBaseUrl,
     required this.apiKey,
     this.voice = 'af_heart',
     this.speed = 1.0,
@@ -17,7 +21,7 @@ class AppConfig {
 
   factory AppConfig.fromJson(Map<String, Object?> json, {required String defaultLibraryDir}) {
     return AppConfig(
-      serverBaseUrl: (json['serverBaseUrl'] as String?) ?? '',
+      serverBaseUrl: (json['serverBaseUrl'] as String?) ?? kDefaultServerBaseUrl,
       apiKey: (json['apiKey'] as String?) ?? '',
       voice: (json['voice'] as String?) ?? 'af_heart',
       speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
@@ -82,7 +86,7 @@ class ConfigStore {
   Future<AppConfig> load() async {
     final file = File(configPath);
     if (!await file.exists()) {
-      return AppConfig(serverBaseUrl: '', apiKey: '', libraryDir: defaultLibraryDir);
+      return AppConfig(apiKey: '', libraryDir: defaultLibraryDir);
     }
     final raw = jsonDecode(await file.readAsString()) as Map<String, Object?>;
     return AppConfig.fromJson(raw, defaultLibraryDir: defaultLibraryDir);

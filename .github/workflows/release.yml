@@ -53,6 +53,7 @@ jobs:
         run: python3 app/tool/patch_media_kit_print.py app/build/linux/x64/release/bundle
       - name: Package
         run: |
+          cp app/linux/packaging/read-aloud.desktop app/linux/packaging/read-aloud.png app/build/linux/x64/release/bundle/
           cd app/build/linux/x64/release/bundle
           tar czf "$GITHUB_WORKSPACE/read-aloud-ui-${{ needs.version.outputs.version }}-linux-x64.tar.gz" .
       - uses: actions/upload-artifact@v4
@@ -93,20 +94,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-      - name: Commit version bump back to main
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          sed -i "s/^version: .*/version: ${{ needs.version.outputs.version }}+${{ github.run_number }}/" app/pubspec.yaml
-          git add app/pubspec.yaml
-          git commit -m "chore(release): ${{ needs.version.outputs.tag }}"
-          git tag ${{ needs.version.outputs.tag }}
-          git push origin main --tags
-      - name: Create GitHub Release
+      - name: Create GitHub Release (tag created via API at this commit)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create ${{ needs.version.outputs.tag }} \
+            --target ${{ github.sha }} \
             --title "read-aloud-ui ${{ needs.version.outputs.tag }}" \
             --generate-notes \
             read-aloud-ui-*-linux-x64.tar.gz read-aloud-ui-*-macos.zip

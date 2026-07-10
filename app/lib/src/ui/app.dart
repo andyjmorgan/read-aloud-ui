@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:local_notifier/local_notifier.dart';
-import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../core/jobs/job_worker.dart';
@@ -22,33 +20,19 @@ class ReadAloudApp extends StatefulWidget {
   State<ReadAloudApp> createState() => _ReadAloudAppState();
 }
 
-class _ReadAloudAppState extends State<ReadAloudApp> with TrayListener, WindowListener {
+class _ReadAloudAppState extends State<ReadAloudApp> with WindowListener {
   StreamSubscription<PlaybackSignal>? _notifySub;
 
   @override
   void initState() {
     super.initState();
-    trayManager.addListener(this);
     windowManager.addListener(this);
-    _initTray();
     _notifySub = widget.runtime.worker.signals.listen(_maybeNotify);
-  }
-
-  Future<void> _initTray() async {
-    try {
-      await trayManager.setIcon(
-        Platform.isWindows ? 'assets/tray/read_aloud_tray.ico' : 'assets/tray/read_aloud_tray.png',
-      );
-      await trayManager.setToolTip('Read Aloud');
-      await trayManager.setContextMenu(Menu(items: [
-        MenuItem(key: 'show', label: 'Show window'),
-        MenuItem(key: 'pause', label: 'Pause playback'),
-        MenuItem.separator(),
-        MenuItem(key: 'quit', label: 'Quit'),
-      ]));
-    } on Exception {
-      // tray is best-effort (e.g. no appindicator on some DEs)
-    }
+    // A second plain launch (e.g. dock click) asks us to surface the window.
+    widget.runtime.onShowRequested = () async {
+      await windowManager.show();
+      await windowManager.focus();
+    };
   }
 
   Future<void> _maybeNotify(PlaybackSignal signal) async {
@@ -68,40 +52,14 @@ class _ReadAloudAppState extends State<ReadAloudApp> with TrayListener, WindowLi
   }
 
   @override
-  void onTrayIconMouseDown() => windowManager.show();
-
-  @override
-  void onTrayMenuItemClick(MenuItem item) {
-    switch (item.key) {
-      case 'show':
-        windowManager.show();
-      case 'pause':
-        widget.engine.pause();
-      case 'quit':
-        _quit();
-    }
-  }
-
-  @override
-  void onTrayIconRightMouseDown() => trayManager.popUpContextMenu();
-
-  @override
   void onWindowClose() async {
-    // close-to-tray: keep serving MCP/IPC in the background
+    // close-to-background: keep serving MCP/IPC; relaunching re-opens the window
     await windowManager.hide();
-  }
-
-  Future<void> _quit() async {
-    await widget.engine.dispose();
-    await widget.runtime.stop();
-    await trayManager.destroy();
-    await windowManager.destroy();
   }
 
   @override
   void dispose() {
     _notifySub?.cancel();
-    trayManager.removeListener(this);
     windowManager.removeListener(this);
     super.dispose();
   }

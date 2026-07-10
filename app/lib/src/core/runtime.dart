@@ -23,6 +23,9 @@ class AppRuntime {
   final JobWorker worker;
   final SingletonIpc ipc;
 
+  /// Set by the UI layer: invoked when a second launch asks us to surface.
+  Future<void> Function()? onShowRequested;
+
   Future<void>? _workerRun;
 
   /// Binds the IPC socket and starts the worker loop.
@@ -56,6 +59,9 @@ class AppRuntime {
     switch (msg['cmd']) {
       case 'ping':
         return {'ok': true, 'pid': pid};
+      case 'show':
+        await onShowRequested?.call();
+        return {'ok': true};
       case 'speak':
         return handleSpeak(msg);
       case 'list':

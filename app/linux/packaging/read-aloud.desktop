@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Read Aloud
+Comment=Stream text to speech via DonkeyWork-Recordings
+Exec=read_aloud_ui
+Icon=read-aloud
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Utility;
+StartupWMClass=dev.donkeywork.read_aloud_ui
