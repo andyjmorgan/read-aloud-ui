@@ -128,3 +128,5 @@ in-memory only. This milestone (lands in the DonkeyWork-Recordings repo, before 
   gating + SSE (R1–R3) — fixes the time-to-first-audio caveat while keeping generation
   server-side.
 - Local format mp3 192k (server default); retention: keep everything until cleared.
+- **Playback device selection is required**: enumerate output devices via mpv/media_kit,
+  dropdown in config, applied live to the player, persisted (`audioDevice`, default auto).

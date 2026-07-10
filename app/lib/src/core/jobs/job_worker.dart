@@ -164,16 +164,23 @@ class JobWorker {
 
   /// Consumes SSE; on stream failure before a terminal event, falls back to
   /// polling. Emits ChunkAvailable strictly in contiguous index order.
+  ///
+  /// Chunks are downloaded into a local cache before being emitted: the server
+  /// sweeps chunk blobs minutes after the recording settles, which would 404
+  /// mid-listen on long texts if the player streamed them remotely.
   Future<_Outcome> _consumeEvents(RecordingsClient client, int jobId, String recordingId) async {
     final buffered = <int, String>{};
     var nextToEmit = 0;
     var watermark = -1;
     var emitted = 0;
+    final cacheDir = '${configStore.dataDir}/cache/$jobId';
 
-    void drain() {
+    Future<void> drain() async {
       while (nextToEmit <= watermark && buffered.containsKey(nextToEmit)) {
         final url = buffered.remove(nextToEmit)!;
-        _emit(ChunkAvailable(jobId: jobId, index: nextToEmit, url: url, headers: client.headersFor(url)));
+        final localPath = '$cacheDir/${nextToEmit.toString().padLeft(5, '0')}.wav';
+        await client.downloadToFile(url, localPath);
+        _emit(ChunkAvailable(jobId: jobId, index: nextToEmit, url: localPath, headers: const {}));
         emitted++;
         nextToEmit++;
       }
@@ -185,7 +192,7 @@ class JobWorker {
           case ChunkReadyEvent(:final index, :final url, :final playableUpTo):
             buffered[index] = url;
             if (playableUpTo > watermark) watermark = playableUpTo;
-            drain();
+            await drain();
           case ProgressEvent(:final progress, :final statusDetail):
             await db.updateJob(
               jobId,
@@ -208,7 +215,7 @@ class JobWorker {
         buffered.putIfAbsent(chunk.index, () => chunk.url);
       }
       if (rec.playableUpTo > watermark) watermark = rec.playableUpTo;
-      drain();
+      await drain();
       await db.updateJob(
         jobId,
         JobsCompanion(

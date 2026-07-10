@@ -1,122 +1,178 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:local_notifier/local_notifier.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:window_manager/window_manager.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+import 'src/core/config.dart';
+import 'src/core/db/database.dart';
+import 'src/core/ipc/singleton.dart';
+import 'src/core/runtime.dart';
+import 'src/playback/audio_sink.dart';
+import 'src/playback/playback_engine.dart';
+import 'src/ui/app.dart';
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  // This widget is the root of your application.
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
-    );
+/// Entrypoints:
+///   read_aloud_ui                — GUI app (primary instance; also serves IPC)
+///   read_aloud_ui --mcp          — MCP server on stdio. Primary: full app.
+///                                  Secondary: headless bridge → running instance.
+///   read_aloud_ui speak|list …   — CLI against the running instance.
+Future<void> main(List<String> args) async {
+  if (args.contains('--help') || args.contains('-h')) {
+    stdout.writeln(usage);
+    exit(0);
   }
-}
-
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  if (args.isNotEmpty && !args.first.startsWith('--')) {
+    exit(await runCli(args));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
+  final mcpMode = args.contains('--mcp');
+  final socketPath = SingletonIpc.defaultSocketPath();
+
+  if (mcpMode && await SingletonIpc.isInstanceRunning(socketPath)) {
+    // Secondary invocation: no GUI, bridge MCP stdio → primary over the socket.
+    final bridge = buildForwardingMcpServer(
+      socketPath: socketPath,
+      stdinStream: stdin,
+      writeLine: stdout.writeln,
     );
+    await bridge.serve();
+    exit(0);
+  }
+
+  if (!mcpMode && await SingletonIpc.isInstanceRunning(socketPath)) {
+    stderr.writeln('read-aloud is already running (socket: $socketPath).');
+    exit(1);
+  }
+
+  // Primary instance: full app (GUI + IPC + worker), optionally MCP on stdio.
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
+  await windowManager.ensureInitialized();
+  await localNotifier.setup(appName: 'Read Aloud');
+
+  final configStore = ConfigStore();
+  await Directory(configStore.dataDir).create(recursive: true);
+  final runtime = AppRuntime(
+    db: AppDatabase.file(configStore.dbPath),
+    configStore: configStore,
+    ipc: SingletonIpc(socketPath: socketPath),
+  );
+  await runtime.start();
+
+  final engine = PlaybackEngine(
+    sink: MediaKitSink(),
+    signals: runtime.worker.signals,
+    autoPlayEnabled: () async => (await configStore.load()).autoPlay,
+  );
+  final config = await configStore.load();
+  await engine.setDevice(config.audioDevice);
+
+  if (mcpMode) {
+    // Serve MCP on stdio alongside the GUI; exit when the client disconnects.
+    unawaited(runtime
+        .buildMcpServer(stdinStream: stdin, writeLine: stdout.writeln)
+        .serve()
+        .then((_) async {
+      await engine.dispose();
+      await runtime.stop();
+      exit(0);
+    }));
+  }
+
+  const options = WindowOptions(
+    size: Size(920, 680),
+    minimumSize: Size(640, 480),
+    center: true,
+    title: 'Read Aloud',
+  );
+  unawaited(windowManager.waitUntilReadyToShow(options, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  }));
+
+  runApp(ReadAloudApp(runtime: runtime, engine: engine));
+}
+
+const usage = '''
+read-aloud-ui — stream text to speech via DonkeyWork-Recordings
+
+USAGE
+  read_aloud_ui                       launch the app
+  read_aloud_ui --mcp                 serve MCP on stdio (bridges if app already runs)
+  read_aloud_ui speak --name <n> [--voice v] [--speed s] <paragraph> [...]
+                                      or pipe text: echo "..." | read_aloud_ui speak --name n --stdin
+  read_aloud_ui list                  show recent jobs (requires running app)
+''';
+
+/// CLI mirroring the MCP surface over the IPC socket. Returns exit code.
+Future<int> runCli(List<String> args, {String? socketPath}) async {
+  final socket = socketPath ?? SingletonIpc.defaultSocketPath();
+  final command = args.first;
+
+  switch (command) {
+    case 'speak':
+      String? name;
+      String? voice;
+      double? speed;
+      var useStdin = false;
+      final paragraphs = <String>[];
+      for (var i = 1; i < args.length; i++) {
+        switch (args[i]) {
+          case '--name':
+            name = args[++i];
+          case '--voice':
+            voice = args[++i];
+          case '--speed':
+            speed = double.tryParse(args[++i]);
+          case '--stdin':
+            useStdin = true;
+          default:
+            paragraphs.add(args[i]);
+        }
+      }
+      if (useStdin) {
+        final text = await stdin.transform(utf8.decoder).join();
+        paragraphs.addAll(
+          text.split(RegExp(r'\n\s*\n')).map((p) => p.trim()).where((p) => p.isNotEmpty),
+        );
+      }
+      if (name == null || paragraphs.isEmpty) {
+        stderr.writeln('speak requires --name and at least one paragraph (args or --stdin).');
+        return 2;
+      }
+      final reply = await SingletonIpc.request(socket, {
+        'cmd': 'speak',
+        'name': name,
+        'paragraphs': paragraphs,
+        'voice': ?voice,
+        'speed': ?speed,
+      });
+      if (reply == null) {
+        stderr.writeln('read-aloud is not running — start the app first.');
+        return 3;
+      }
+      stdout.writeln(jsonEncode(reply));
+      return reply['ok'] == true ? 0 : 1;
+
+    case 'list':
+      final reply = await SingletonIpc.request(socket, {'cmd': 'list'});
+      if (reply == null) {
+        stderr.writeln('read-aloud is not running — start the app first.');
+        return 3;
+      }
+      for (final job in (reply['jobs'] as List? ?? [])) {
+        final j = (job as Map).cast<String, Object?>();
+        stdout.writeln('#${j['id']}  [${j['status']}]  ${j['name']}'
+            '${j['error'] != null ? '  error: ${j['error']}' : ''}');
+      }
+      return 0;
+
+    default:
+      stderr.writeln('unknown command: $command\n$usage');
+      return 2;
   }
 }

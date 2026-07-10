@@ -27,8 +27,20 @@ class AppRuntime {
 
   /// Binds the IPC socket and starts the worker loop.
   Future<void> start() async {
+    await _sweepChunkCache();
     await ipc.serve(handleIpcRequest);
     _workerRun = worker.run();
+  }
+
+  /// Chunk WAVs cached during live playback are session-scoped; clear them at
+  /// startup (nothing can be playing yet, so this is the one safe moment).
+  Future<void> _sweepChunkCache() async {
+    final cache = Directory('${configStore.dataDir}/cache');
+    try {
+      if (await cache.exists()) await cache.delete(recursive: true);
+    } on FileSystemException {
+      // best-effort
+    }
   }
 
   Future<void> stop() async {

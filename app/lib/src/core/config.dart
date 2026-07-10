@@ -12,6 +12,7 @@ class AppConfig {
     this.notifyOnReady = true,
     required this.libraryDir,
     this.scratchChannelName = '_read-aloud',
+    this.audioDevice = 'auto',
   });
 
   factory AppConfig.fromJson(Map<String, Object?> json, {required String defaultLibraryDir}) {
@@ -24,6 +25,7 @@ class AppConfig {
       notifyOnReady: (json['notifyOnReady'] as bool?) ?? true,
       libraryDir: (json['libraryDir'] as String?) ?? defaultLibraryDir,
       scratchChannelName: (json['scratchChannelName'] as String?) ?? '_read-aloud',
+      audioDevice: (json['audioDevice'] as String?) ?? 'auto',
     );
   }
 
@@ -35,6 +37,7 @@ class AppConfig {
   bool notifyOnReady;
   String libraryDir;
   String scratchChannelName;
+  String audioDevice;
 
   bool get isConfigured => serverBaseUrl.isNotEmpty && apiKey.isNotEmpty;
 
@@ -47,6 +50,7 @@ class AppConfig {
         'notifyOnReady': notifyOnReady,
         'libraryDir': libraryDir,
         'scratchChannelName': scratchChannelName,
+        'audioDevice': audioDevice,
       };
 }
 

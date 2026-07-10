@@ -84,7 +84,10 @@ void main() {
 
     final chunks = signals.whereType<ChunkAvailable>().toList();
     expect(chunks.map((c) => c.index), [0, 1, 2], reason: 'strictly contiguous order');
-    expect(chunks.first.headers, containsPair('X-Api-Key', FakeRecordingsServer.validKey));
+    // chunks are cached locally before playback (server sweeps them post-Ready)
+    expect(chunks.first.url, startsWith('${tmp.path}/data/cache/'));
+    expect(await File(chunks.first.url).readAsString(), 'AUDIO:/media/c0.wav');
+    expect(chunks.first.headers, isEmpty);
 
     final ready = signals.whereType<FinalFileReady>().single;
     expect(ready.playedLive, isTrue);
