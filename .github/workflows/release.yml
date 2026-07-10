@@ -49,6 +49,8 @@ jobs:
           cd app
           sed -i "s/^version: .*/version: ${{ needs.version.outputs.version }}+${{ github.run_number }}/" pubspec.yaml
       - run: cd app && flutter pub get && flutter build linux --release
+      - name: Silence media_kit stdout banner (MCP stdio purity)
+        run: python3 app/tool/patch_media_kit_print.py app/build/linux/x64/release/bundle
       - name: Package
         run: |
           cd app/build/linux/x64/release/bundle
@@ -72,6 +74,8 @@ jobs:
           cd app
           sed -i '' "s/^version: .*/version: ${{ needs.version.outputs.version }}+${{ github.run_number }}/" pubspec.yaml
       - run: cd app && flutter pub get && flutter build macos --release
+      - name: Silence media_kit stdout banner (MCP stdio purity)
+        run: python3 app/tool/patch_media_kit_print.py app/build/macos/Build/Products/Release
       - name: Package (unsigned .app)
         run: |
           cd app/build/macos/Build/Products/Release
