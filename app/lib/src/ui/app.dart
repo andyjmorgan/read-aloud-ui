@@ -37,7 +37,7 @@ class _ReadAloudAppState extends State<ReadAloudApp> with TrayListener, WindowLi
   Future<void> _initTray() async {
     try {
       await trayManager.setIcon(
-        Platform.isWindows ? 'assets/tray/tray_icon.ico' : 'assets/tray/tray_icon.png',
+        Platform.isWindows ? 'assets/tray/read_aloud_tray.ico' : 'assets/tray/read_aloud_tray.png',
       );
       await trayManager.setToolTip('Read Aloud');
       await trayManager.setContextMenu(Menu(items: [
