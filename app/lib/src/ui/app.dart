@@ -39,8 +39,10 @@ class _ReadAloudAppState extends State<ReadAloudApp> with WindowListener {
     final config = await widget.runtime.configStore.load();
     if (!config.notifyOnReady) return;
     switch (signal) {
-      case FinalFileReady(:final jobId, :final playedLive):
-        if (playedLive) return; // already heard it live
+      case FinalFileReady(:final jobId):
+        // suppress only when the audio really streamed live (worker's
+        // playedLive flag counts emitted chunks, not played ones)
+        if (widget.engine.didPlayLive(jobId)) return;
         final job = await widget.runtime.db.getJob(jobId);
         LocalNotification(title: 'Recording ready', body: job?.name ?? 'Recording #$jobId').show();
       case JobFailed(:final jobId, :final error):

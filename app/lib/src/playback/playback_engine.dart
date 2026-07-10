@@ -51,6 +51,12 @@ class PlaybackEngine {
   /// Chunks waiting to be played (live session only).
   final _queue = <(String, Map<String, String>)>[];
 
+  /// Jobs whose audio actually streamed live through the sink.
+  final _livePlayed = <int>{};
+
+  /// True when [jobId]'s chunks were really played as they generated.
+  bool didPlayLive(int jobId) => _livePlayed.contains(jobId);
+
   /// True when the sink finished its current item and the queue was empty —
   /// the next arriving chunk must start playback itself.
   var _stalled = false;
@@ -69,6 +75,7 @@ class PlaybackEngine {
           _liveStreamDone = false;
           _stalled = false;
           _queue.clear();
+          _livePlayed.add(jobId);
           await _playItem(url, headers);
         } else if (jobId == _liveJobId) {
           _queue.add((url, headers));

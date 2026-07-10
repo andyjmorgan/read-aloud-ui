@@ -151,11 +151,19 @@ void main() {
     expect(states.last.jobId, isNull, reason: 'nothing left to play');
   });
 
-  test('autoplay off: live chunks are ignored', () async {
+  test('autoplay off: live chunks are ignored and didPlayLive is false', () async {
     autoPlay = false;
     signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'u', headers: {}));
     await pump();
     expect(sink.log, isEmpty);
+    expect(engine.didPlayLive(1), isFalse);
+  });
+
+  test('didPlayLive true after a live session starts', () async {
+    signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'c0', headers: {}));
+    await pump();
+    expect(engine.didPlayLive(1), isTrue);
+    expect(engine.didPlayLive(2), isFalse);
   });
 
   test('second job does not hijack an active live session', () async {
