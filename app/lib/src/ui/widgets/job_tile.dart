@@ -4,12 +4,21 @@ import '../../core/db/database.dart';
 import '../../playback/playback_engine.dart';
 import '../theme/donkeywork_theme.dart';
 
-class JobTile extends StatelessWidget {
+class JobTile extends StatefulWidget {
   const JobTile({super.key, required this.job, required this.engine, required this.onDelete});
 
   final Job job;
   final PlaybackEngine engine;
   final VoidCallback onDelete;
+
+  @override
+  State<JobTile> createState() => _JobTileState();
+}
+
+class _JobTileState extends State<JobTile> {
+  var _expanded = false;
+
+  Job get job => widget.job;
 
   bool get _active =>
       job.status == JobStatus.submitting ||
@@ -41,22 +50,59 @@ class JobTile extends StatelessWidget {
                   IconButton(
                     tooltip: 'Play',
                     icon: Icon(Icons.play_circle_outline, color: dw.accent),
-                    onPressed: () => engine.playFile(job.id, job.filePath!),
+                    onPressed: () => widget.engine.playFile(job.id, job.filePath!),
                   ),
                 if (!_active)
                   IconButton(
                     tooltip: 'Delete',
                     icon: Icon(Icons.delete_outline, color: dw.textTertiary),
-                    onPressed: onDelete,
+                    onPressed: widget.onDelete,
                   ),
               ],
             ),
             const SizedBox(height: 6),
-            Text(
-              transcript.join(' '),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: dw.textSecondary, fontSize: 13),
+            InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _expanded
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (final paragraph in transcript)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Text(
+                                      paragraph,
+                                      style: TextStyle(color: dw.textSecondary, fontSize: 13, height: 1.45),
+                                    ),
+                                  ),
+                              ],
+                            )
+                          : Text(
+                              transcript.join(' '),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: dw.textSecondary, fontSize: 13),
+                            ),
+                    ),
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: AnimatedRotation(
+                        turns: _expanded ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 150),
+                        child: Icon(Icons.expand_more, size: 18, color: dw.textTertiary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
             if (_active) ...[
               const SizedBox(height: 10),
@@ -64,7 +110,7 @@ class JobTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(value: job.progress <= 0 ? null : job.progress, minHeight: 6),
               ),
-              if (job.statusDetail != null) ...[
+              if (job.statusDetail != null && job.statusDetail!.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(job.statusDetail!, style: TextStyle(color: dw.textTertiary, fontSize: 12)),
               ],

@@ -132,6 +132,28 @@ void main() {
       await _drainTimers(tester);
     });
 
+    testWidgets('transcript expands and collapses on tap', (tester) async {
+      final job = await jobWith(tester, JobStatus.done, filePath: '/lib/x.mp3', progress: 1);
+      await tester.pumpWidget(_wrap(Scaffold(
+        body: JobTile(job: job, engine: engine, onDelete: () {}),
+      )));
+      // collapsed: single joined preview line
+      expect(find.text('para one para two'), findsOneWidget);
+      expect(find.text('para one'), findsNothing);
+
+      await tester.tap(find.byIcon(Icons.expand_more));
+      await tester.pumpAndSettle();
+      // expanded: each paragraph on its own
+      expect(find.text('para one'), findsOneWidget);
+      expect(find.text('para two'), findsOneWidget);
+      expect(find.text('para one para two'), findsNothing);
+
+      await tester.tap(find.byIcon(Icons.expand_more));
+      await tester.pumpAndSettle();
+      expect(find.text('para one para two'), findsOneWidget);
+      await _drainTimers(tester);
+    });
+
     testWidgets('done shows meta and play triggers engine', (tester) async {
       final job = await jobWith(tester, JobStatus.done, filePath: '/lib/x.mp3', progress: 1);
       await tester.pumpWidget(_wrap(Scaffold(
@@ -160,6 +182,8 @@ void main() {
       });
       await _waitFor(tester, find.text('LIVE'));
       await _waitFor(tester, find.text('now playing'));
+      expect(find.text('Streaming…'), findsOneWidget);
+      expect(find.byType(Slider), findsNothing, reason: 'no seek bar while live');
       await _drainTimers(tester);
     });
 
@@ -169,6 +193,8 @@ void main() {
       await tester.runAsync(() => engine.playFile(job.id, '/lib/f.mp3'));
       await _waitFor(tester, find.byTooltip('Pause'));
       expect(find.text('LIVE'), findsNothing, reason: 'library playback is not live');
+      expect(find.byType(Slider), findsOneWidget, reason: 'seek bar for library playback');
+      expect(find.text('Streaming…'), findsNothing);
 
       await tester.tap(find.byTooltip('Pause'));
       await _waitFor(tester, find.byTooltip('Resume'));

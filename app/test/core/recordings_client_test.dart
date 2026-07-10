@@ -34,13 +34,12 @@ void main() {
       name: 'n',
       paragraphs: ['a', 'b'],
       voice: 'af_bella',
-      speed: 1.2,
     );
     expect(rec.status, RecordingStatus.pending);
     final created = server.recordings.values.single.createBody!;
+    expect(created['collectionId'], col);
     expect(created['paragraphs'], ['a', 'b']);
     expect(created['voice'], 'af_bella');
-    expect(created['speed'], 1.2);
   });
 
   test('getRecording maps chunks and playableUpTo', () async {

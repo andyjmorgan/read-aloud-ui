@@ -11,8 +11,7 @@ import 'sse.dart';
 /// backend contract shifts.
 class RecordingsRoutes {
   static const collections = '/api/v1/collections';
-  static String recordings(String collectionId) =>
-      '/api/v1/collections/$collectionId/recordings';
+  static const generate = '/api/v1/recordings/generate';
   static String recording(String id) => '/api/v1/recordings/$id';
   static String events(String id) => '/api/v1/recordings/$id/events';
 }
@@ -68,21 +67,22 @@ class RecordingsClient {
     return ((jsonDecode(createRes.body) as Map).cast<String, Object?>())['id'] as String;
   }
 
+  /// Starts generation. Note: the backend derives pacing from the channel /
+  /// voice — there is no per-request speed on this endpoint.
   Future<RecordingDto> createRecording({
     required String collectionId,
     required String name,
     required List<String> paragraphs,
     String? voice,
-    double? speed,
   }) async {
     final res = await _http.post(
-      _uri(RecordingsRoutes.recordings(collectionId)),
+      _uri(RecordingsRoutes.generate),
       headers: _headers,
       body: jsonEncode({
+        'collectionId': collectionId,
         'name': name,
         'paragraphs': paragraphs,
         'voice': ?voice,
-        'speed': ?speed,
       }),
     );
     _throwUnlessOk(res, 'create recording');

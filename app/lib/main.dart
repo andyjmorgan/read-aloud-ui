@@ -84,7 +84,7 @@ Future<void> main(List<String> args) async {
   }
 
   const options = WindowOptions(
-    size: Size(920, 680),
+    size: Size(720, 640),
     minimumSize: Size(640, 480),
     center: true,
     title: 'Read Aloud',

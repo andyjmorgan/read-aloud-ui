@@ -59,7 +59,7 @@ class FakeRecordingsServer {
         final collection = {'id': 'col-${++_idCounter}', 'name': body['name']};
         collections.add(collection);
         _json(req, collection);
-      } else if (req.method == 'POST' && RegExp(r'^/api/v1/collections/[^/]+/recordings$').hasMatch(path)) {
+      } else if (req.method == 'POST' && path == '/api/v1/recordings/generate') {
         final body = await _body(req);
         final rec = addRecording();
         rec.createBody = body;

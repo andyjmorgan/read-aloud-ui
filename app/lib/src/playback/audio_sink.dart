@@ -13,15 +13,19 @@ class OutputDevice {
 /// Minimal seam over the audio backend so engine logic is unit-testable.
 abstract interface class AudioSink {
   Future<void> open(String uri, {Map<String, String> headers});
-  Future<void> append(String uri, {Map<String, String> headers});
   Future<void> play();
   Future<void> pause();
   Future<void> stop();
   Future<void> setDevice(String deviceId);
   Future<List<OutputDevice>> listDevices();
+  Future<void> seek(Duration position);
 
   /// True while something is actively playing.
   Stream<bool> get playingStream;
+
+  /// Position/duration of the current media item.
+  Stream<Duration> get positionStream;
+  Stream<Duration> get durationStream;
 
   /// Fires when the playlist is exhausted.
   Stream<void> get completedStream;
@@ -38,11 +42,7 @@ class MediaKitSink implements AudioSink {
 
   @override
   Future<void> open(String uri, {Map<String, String> headers = const {}}) =>
-      _player.open(Playlist([Media(uri, httpHeaders: headers)]));
-
-  @override
-  Future<void> append(String uri, {Map<String, String> headers = const {}}) =>
-      _player.add(Media(uri, httpHeaders: headers));
+      _player.open(Media(uri, httpHeaders: headers));
 
   @override
   Future<void> play() => _player.play();
@@ -52,6 +52,9 @@ class MediaKitSink implements AudioSink {
 
   @override
   Future<void> stop() => _player.stop();
+
+  @override
+  Future<void> seek(Duration position) => _player.seek(position);
 
   @override
   Future<void> setDevice(String deviceId) => _player.setAudioDevice(
@@ -73,6 +76,20 @@ class MediaKitSink implements AudioSink {
 
   @override
   Stream<bool> get playingStream => _player.stream.playing;
+
+  // Seed with current state: subscribers often attach after mpv has already
+  // emitted the media's duration (broadcast streams do not replay).
+  @override
+  Stream<Duration> get positionStream async* {
+    yield _player.state.position;
+    yield* _player.stream.position;
+  }
+
+  @override
+  Stream<Duration> get durationStream async* {
+    yield _player.state.duration;
+    yield* _player.stream.duration;
+  }
 
   @override
   Stream<void> get completedStream =>

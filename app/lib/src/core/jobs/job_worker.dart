@@ -118,7 +118,6 @@ class JobWorker {
         name: job.name,
         paragraphs: decodeTranscript(job.transcriptJson),
         voice: job.voice ?? config.voice,
-        speed: job.speed ?? config.speed,
       );
       await db.updateJob(
         job.id,

@@ -15,11 +15,14 @@ class PlaybackState {
   final bool live;
 }
 
-/// Feeds worker playback signals into the audio sink:
-///  - live path: contiguous chunk URLs appended to a gapless playlist
-///  - library path: play a downloaded file on demand
-/// Only one job plays at a time; live streaming starts only when idle and
-/// auto-play is enabled (queried per event so config changes apply instantly).
+/// Feeds worker playback signals into the audio sink.
+///
+/// The engine owns the chunk queue: every item is played with an explicit
+/// open+play when the previous one completes. This deliberately avoids the
+/// backend player's playlist-append semantics, where appending to an
+/// already-ended playlist does not resume playback (chunks arrive slower than
+/// they play, so the "playlist ended, then a new item arrived" case is the
+/// COMMON case, not an edge case).
 class PlaybackEngine {
   PlaybackEngine({
     required this.sink,
@@ -45,6 +48,13 @@ class PlaybackEngine {
   var _playing = false;
   var _liveStreamDone = false;
 
+  /// Chunks waiting to be played (live session only).
+  final _queue = <(String, Map<String, String>)>[];
+
+  /// True when the sink finished its current item and the queue was empty —
+  /// the next arriving chunk must start playback itself.
+  var _stalled = false;
+
   late final StreamSubscription<PlaybackSignal> _sub;
   late final StreamSubscription<void> _completedSub;
   late final StreamSubscription<bool> _playingSub;
@@ -57,26 +67,31 @@ class PlaybackEngine {
           _liveJobId = jobId;
           _currentJobId = jobId;
           _liveStreamDone = false;
-          await sink.open(url, headers: headers);
-          await sink.play();
-          _push();
+          _stalled = false;
+          _queue.clear();
+          await _playItem(url, headers);
         } else if (jobId == _liveJobId) {
-          await sink.append(url, headers: headers);
+          _queue.add((url, headers));
+          if (_stalled) {
+            _stalled = false;
+            final (nextUrl, nextHeaders) = _queue.removeAt(0);
+            await _playItem(nextUrl, nextHeaders);
+          }
         }
-      case FinalFileReady(:final jobId, :final path, :final playedLive):
+      case FinalFileReady(:final jobId, :final playedLive, :final path):
         if (jobId == _liveJobId) {
-          // chunks already streaming — let them finish; remember stream is complete
           _liveStreamDone = true;
+          if (_stalled && _queue.isEmpty) _endSession();
         } else if (!playedLive && _currentJobId == null && await autoPlayEnabled()) {
+          _liveJobId = null;
           _currentJobId = jobId;
-          await sink.open(path);
-          await sink.play();
-          _push();
+          _liveStreamDone = false;
+          await _playItem(path, const {});
         }
       case JobFailed(:final jobId):
         if (jobId == _liveJobId) {
-          // stop at the last good chunk once the queue drains
           _liveStreamDone = true;
+          if (_stalled && _queue.isEmpty) _endSession();
         }
     }
   }
@@ -86,9 +101,9 @@ class PlaybackEngine {
     _liveJobId = null;
     _currentJobId = jobId;
     _liveStreamDone = false;
-    await sink.open(path);
-    await sink.play();
-    _push();
+    _stalled = false;
+    _queue.clear();
+    await _playItem(path, const {});
   }
 
   Future<void> pause() => sink.pause();
@@ -96,21 +111,49 @@ class PlaybackEngine {
 
   Future<void> stopPlayback() async {
     await sink.stop();
-    _liveJobId = null;
-    _currentJobId = null;
-    _push();
+    _queue.clear();
+    _endSession();
   }
 
   Future<void> setDevice(String deviceId) => sink.setDevice(deviceId);
   Future<List<OutputDevice>> listDevices() => sink.listDevices();
 
+  /// Position/duration of the current item (per-chunk during live streaming).
+  Stream<Duration> get position => sink.positionStream;
+  Stream<Duration> get duration => sink.durationStream;
+
+  Future<void> seek(Duration to) async {
+    if (_currentJobId != null) await sink.seek(to);
+  }
+
+  Future<void> _playItem(String url, Map<String, String> headers) async {
+    await sink.open(url, headers: headers);
+    await sink.play();
+    _push();
+  }
+
   void _onCompleted() {
-    // Playlist exhausted. For a live job that is still generating, media_kit
-    // just waits for the next append; completion only ends the session when
-    // the stream has finished (or a library file ended).
-    if (_liveJobId != null && !_liveStreamDone) return;
+    if (_liveJobId != null) {
+      if (_queue.isNotEmpty) {
+        final (url, headers) = _queue.removeAt(0);
+        unawaited(_playItem(url, headers));
+      } else if (_liveStreamDone) {
+        _endSession();
+      } else {
+        // generation is slower than playback — wait for the next chunk
+        _stalled = true;
+      }
+      return;
+    }
+    // library file finished
+    _endSession();
+  }
+
+  void _endSession() {
     _liveJobId = null;
     _currentJobId = null;
+    _liveStreamDone = false;
+    _stalled = false;
     _push();
   }
 

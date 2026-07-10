@@ -17,11 +17,6 @@ class FakeSink implements AudioSink {
   }
 
   @override
-  Future<void> append(String uri, {Map<String, String> headers = const {}}) async {
-    log.add('append:$uri');
-  }
-
-  @override
   Future<void> play() async {
     log.add('play');
     playing.add(true);
@@ -45,6 +40,20 @@ class FakeSink implements AudioSink {
     log.add('device:$deviceId');
   }
 
+  final position = StreamController<Duration>.broadcast();
+  final duration = StreamController<Duration>.broadcast();
+
+  @override
+  Future<void> seek(Duration position) async {
+    log.add('seek:${position.inSeconds}');
+  }
+
+  @override
+  Stream<Duration> get positionStream => position.stream;
+
+  @override
+  Stream<Duration> get durationStream => duration.stream;
+
   @override
   Future<List<OutputDevice>> listDevices() async => const [
         OutputDevice.auto,
@@ -61,6 +70,8 @@ class FakeSink implements AudioSink {
   Future<void> dispose() async {
     log.add('dispose');
   }
+
+  List<String> get opens => log.where((l) => l.startsWith('open:')).toList();
 }
 
 void main() {
@@ -87,18 +98,57 @@ void main() {
 
   Future<void> pump() => Future<void>.delayed(const Duration(milliseconds: 20));
 
-  test('live path: chunk 0 opens+plays, later chunks append', () async {
+  test('live path: chunk 0 plays immediately, queued chunks play on completion', () async {
+    signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'c0', headers: {}));
+    await pump();
+    signals.add(const ChunkAvailable(jobId: 1, index: 1, url: 'c1', headers: {}));
+    signals.add(const ChunkAvailable(jobId: 1, index: 2, url: 'c2', headers: {}));
+    await pump();
+    expect(sink.opens, ['open:c0'], reason: 'later chunks queue while c0 plays');
+
+    sink.completed.add(null);
+    await pump();
+    expect(sink.opens, ['open:c0', 'open:c1']);
+
+    sink.completed.add(null);
+    await pump();
+    expect(sink.opens, ['open:c0', 'open:c1', 'open:c2']);
+  });
+
+  test('THE STALL CASE: playlist drains before next chunk arrives, playback resumes', () async {
     final states = <PlaybackState>[];
     engine.state.listen(states.add);
 
-    signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'http://s/c0.wav', headers: {'X-Api-Key': 'k'}));
+    signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'c0', headers: {}));
     await pump();
-    signals.add(const ChunkAvailable(jobId: 1, index: 1, url: 'http://s/c1.wav', headers: {}));
-    signals.add(const ChunkAvailable(jobId: 1, index: 2, url: 'http://s/c2.wav', headers: {}));
+    // chunk 0 finishes with NOTHING queued (generation slower than playback)
+    sink.completed.add(null);
     await pump();
+    expect(states.last.jobId, 1, reason: 'session survives the stall');
 
-    expect(sink.log, ['open:http://s/c0.wav:auth', 'play', 'append:http://s/c1.wav', 'append:http://s/c2.wav']);
-    expect(states.any((s) => s.live && s.jobId == 1), isTrue);
+    // next chunk lands later — playback must resume by itself
+    signals.add(const ChunkAvailable(jobId: 1, index: 1, url: 'c1', headers: {}));
+    await pump();
+    expect(sink.opens, ['open:c0', 'open:c1']);
+
+    // stream completes; final chunk finishes; session ends
+    signals.add(const FinalFileReady(jobId: 1, path: '/lib/f.mp3', playedLive: true));
+    await pump();
+    sink.completed.add(null);
+    await pump();
+    expect(states.last.jobId, isNull);
+  });
+
+  test('final-ready during a stall ends the session', () async {
+    final states = <PlaybackState>[];
+    engine.state.listen(states.add);
+    signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'c0', headers: {}));
+    await pump();
+    sink.completed.add(null); // stalled
+    await pump();
+    signals.add(const FinalFileReady(jobId: 1, path: '/f.mp3', playedLive: true));
+    await pump();
+    expect(states.last.jobId, isNull, reason: 'nothing left to play');
   });
 
   test('autoplay off: live chunks are ignored', () async {
@@ -113,61 +163,59 @@ void main() {
     await pump();
     signals.add(const ChunkAvailable(jobId: 2, index: 0, url: 'b0', headers: {}));
     await pump();
-    expect(sink.log.where((l) => l.startsWith('open:')), hasLength(1));
-  });
-
-  test('final file for the live job does not restart playback', () async {
-    signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'c0', headers: {}));
-    await pump();
-    signals.add(const FinalFileReady(jobId: 1, path: '/lib/f.mp3', playedLive: true));
-    await pump();
-    expect(sink.log.where((l) => l.startsWith('open:')), hasLength(1));
-
-    // now that the stream is done, completion ends the session
-    sink.completed.add(null);
-    await pump();
-    final last = await engine.state.first.timeout(const Duration(seconds: 1), onTimeout: () => const PlaybackState());
-    expect(last.jobId, isNull);
-  });
-
-  test('final file without live playback auto-plays when idle', () async {
-    signals.add(const FinalFileReady(jobId: 3, path: '/lib/3.mp3', playedLive: false));
-    await pump();
-    expect(sink.log, ['open:/lib/3.mp3', 'play']);
-  });
-
-  test('completion mid-live-stream does not end the session (waiting on next chunk)', () async {
-    final states = <PlaybackState>[];
-    engine.state.listen(states.add);
-    signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'c0', headers: {}));
-    await pump();
-    sink.completed.add(null); // playlist drained but generation continues
-    await pump();
-    signals.add(const ChunkAvailable(jobId: 1, index: 1, url: 'c1', headers: {}));
-    await pump();
-    expect(sink.log.last, 'append:c1');
-    expect(states.last.jobId, 1, reason: 'session still active');
+    expect(sink.opens, ['open:a0']);
   });
 
   test('failure mid-stream: session ends once queue drains', () async {
+    final states = <PlaybackState>[];
+    engine.state.listen(states.add);
     signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'c0', headers: {}));
     await pump();
     signals.add(const JobFailed(jobId: 1, error: 'x'));
     await pump();
-    final states = <PlaybackState>[];
-    engine.state.listen(states.add);
     sink.completed.add(null);
     await pump();
     expect(states.last.jobId, isNull);
   });
 
-  test('manual playFile takes over and stop clears', () async {
+  test('final file without live playback auto-plays when idle, ends on completion', () async {
+    final states = <PlaybackState>[];
+    engine.state.listen(states.add);
+    signals.add(const FinalFileReady(jobId: 3, path: '/lib/3.mp3', playedLive: false));
+    await pump();
+    expect(sink.opens, ['open:/lib/3.mp3']);
+    expect(states.last.live, isFalse);
+    sink.completed.add(null);
+    await pump();
+    expect(states.last.jobId, isNull);
+  });
+
+  test('manual playFile takes over live session and stop clears queue', () async {
+    signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'c0', headers: {}));
+    await pump();
+    signals.add(const ChunkAvailable(jobId: 1, index: 1, url: 'c1', headers: {}));
+    await pump();
+
     await engine.playFile(9, '/lib/9.mp3');
-    expect(sink.log, ['open:/lib/9.mp3', 'play']);
+    expect(sink.opens.last, 'open:/lib/9.mp3');
+
     await engine.pause();
     await engine.resume();
     await engine.stopPlayback();
-    expect(sink.log.sublist(2), ['pause', 'play', 'stop']);
+    expect(sink.log.sublist(sink.log.length - 3), ['pause', 'play', 'stop']);
+
+    // queued live chunk must NOT resurface after stop
+    sink.completed.add(null);
+    await pump();
+    expect(sink.opens.last, 'open:/lib/9.mp3');
+  });
+
+  test('seek passes through only while a job is loaded', () async {
+    await engine.seek(const Duration(seconds: 5));
+    expect(sink.log, isEmpty, reason: 'idle: seek ignored');
+    await engine.playFile(1, '/f.mp3');
+    await engine.seek(const Duration(seconds: 5));
+    expect(sink.log, contains('seek:5'));
   });
 
   test('device selection passes through', () async {
@@ -175,5 +223,11 @@ void main() {
     expect(sink.device, 'pulse/hdmi');
     final devices = await engine.listDevices();
     expect(devices.map((d) => d.id), ['auto', 'pulse/hdmi']);
+  });
+
+  test('auth headers are forwarded to the sink', () async {
+    signals.add(const ChunkAvailable(jobId: 1, index: 0, url: 'http://s/c0', headers: {'X-Api-Key': 'k'}));
+    await pump();
+    expect(sink.opens, ['open:http://s/c0:auth']);
   });
 }
